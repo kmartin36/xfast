@@ -8,8 +8,11 @@
 #include <chrono>
 #include <ctime>
 #include <cmath>
-#include <sparsehash/sparse_hash_map>
+#include <../sparsehash/sparse_hash_map>
 #include <sys/resource.h>
+
+// Compile with: g++ -O3 -std=c++11 -o xfast xfast.cpp
+// Run with: ./xfast 1000000
 
 using std::cout;
 using std::endl;
