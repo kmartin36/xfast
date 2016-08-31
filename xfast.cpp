@@ -5,6 +5,11 @@
 #include <vector>
 #include <limits>
 #include <map>
+#include <chrono>
+#include <ctime>
+#include <cmath>
+#include <sparsehash/sparse_hash_map>
+#include <sys/resource.h>
 
 using std::cout;
 using std::endl;
@@ -205,8 +210,8 @@ public:
   int clz(key x);
 
 private:
-  std::vector<std::unordered_map<key, std::pair<key, key> > > tables;
-  std::unordered_map<key, std::pair<std::pair<key, key>, T> > t0;
+  std::vector<google::sparse_hash_map<key, std::pair<key, key> > > tables;
+  google::sparse_hash_map<key, std::pair<std::pair<key, key>, T> > t0;
   std::pair<std::pair<key, key>, int> inner(key x);
   key closer(key x, std::pair<key, key> u);
   key near(key x);
@@ -318,7 +323,8 @@ bool kfast<key, T>::insert(key x, T y) {
   if (t0.empty()) {
     accesses++;
     t0.insert({x, std::make_pair(std::make_pair(x, x), y)});
-    tables.push_back({{0, std::make_pair(x, x)}});
+    tables.resize(tables.size() + 1);
+    tables.back()[0] = std::make_pair(x, x);
     return true;
   }
   if (contains(x))
@@ -359,7 +365,8 @@ bool kfast<key, T>::insert(key x, T y) {
     }
   }
   for (i=tables.size(); i<=j; i++) {
-    tables.push_back({{(x >> (w-1-i)) >> 1, v}});
+    tables.resize(tables.size() + 1);
+    tables.back()[(x >> (w-1-i)) >> 1] = v;
   }
   
   return true;
@@ -414,44 +421,45 @@ std::size_t kfast<key, T>::getStorageUsed() {
 }
 
 int main(int argc, char **argv) {
-  xfast<unsigned long long, unsigned long long> a;
   std::map<unsigned long long, unsigned long long> b;
   kfast<unsigned long long, unsigned long long> c;
   std::random_device rd;
   std::mt19937_64 gen(rd());
+//   unsigned long long k = gen();
+  std::chrono::time_point<std::chrono::high_resolution_clock> start, end;
+  std::chrono::duration<double> elapsed_b(0.0), elapsed_c(0.0);
   
-//   std::cout << a.getNumElements() << ' ' << a.getStorageUsed() << ' ' << a.getOperationsCount() << std::endl;
-//   std::cout << c.getNumElements() << ' ' << c.getStorageUsed() << ' ' << c.getOperationsCount() << std::endl;
   int count = atoi(argv[1]);
   for (int i=0; i<count; i++) {
-    unsigned long long k = gen(), v = i;
-    b.emplace(k, v);
-//     a.insert(k, v);
-    c.insert(k, v);
+//     unsigned long long k = gen(), v = i;
+    unsigned long long k = gen();
+//     k = k * 2862933555777941757UL + 3037000493UL;
+    start = std::chrono::high_resolution_clock::now();
+    b.emplace(k, k);
+    end = std::chrono::high_resolution_clock::now();
+    elapsed_b += end - start;
+    c.insert(k, k);
+    start = std::chrono::high_resolution_clock::now();
+    elapsed_c += start - end;
   }
-//   std::cout << a.getNumElements() << ' ' << a.getStorageUsed() << ' ' << a.getOperationsCount() << std::endl;
-  std::cout << c.getNumElements() << ' ' << c.getStorageUsed() << ' ' << c.getOperationsCount() << std::endl;
-  unsigned long long ops = a.getOperationsCount();
+//   std::cout << c.getNumElements() << ' ' << c.getStorageUsed() << ' ' << c.getOperationsCount() << ' ' << elapsed_b.count() << ' ' << elapsed_c.count() << std::endl;
+  std::cout << count << ' ' << elapsed_b.count()*1000000/count << ' ' << elapsed_c.count()*1000000/count << ' ';
+  
+  elapsed_b = std::chrono::duration<double>::zero();
+  elapsed_c = std::chrono::duration<double>::zero();
+  unsigned long long ops = c.getOperationsCount();
   unsigned long long good = 0;
-//   for (int i=0; i<count; i++) {
-//     unsigned long long x = gen(), k0, k1;
-//     k0 = a.lower_bound(x);
-//     auto it = b.lower_bound(x);
-//     if (it == b.end())
-//       it = b.begin();
-//     k1 = it->first;
-//     if (k0 == k1)
-//       good++;
-//     // else
-//       // std::cout << k0 << ' ' << k1 << std::endl;
-//   }
-//   std::cout << good << ' ' << a.getNumElements() << ' ' << /*a.getStorageUsed() << ' ' <<*/ a.getOperationsCount()-ops << std::endl;
-  ops = c.getOperationsCount();
-  good = 0;
-  for (int i=0; i<count; i++) {
+  for (int i=0; i<1000000; i++) {
     unsigned long long x = gen(), k0, k1;
+//     unsigned long long x = k, k0, k1;
+//     k = k * 2862933555777941757UL + 3037000493UL;
+    start = std::chrono::high_resolution_clock::now();
     k0 = c.lower_bound(x);
+    end = std::chrono::high_resolution_clock::now();
+    elapsed_c += end - start;
     auto it = b.lower_bound(x);
+    start = std::chrono::high_resolution_clock::now();
+    elapsed_b += start - end;
     if (it == b.end())
       it = b.begin();
     k1 = it->first;
@@ -460,22 +468,29 @@ int main(int argc, char **argv) {
     else
       printf("%016llx %016llx %016llx\n", k0, k1, x);
   }
-  std::cout << good << ' ' << c.getNumElements() << ' ' << /*c.getStorageUsed() << ' ' <<*/ c.getOperationsCount()-ops << ' ' << c.getDepth() << std::endl;
+//   std::cout << good << ' ' << c.getNumElements() << ' ' << c.getOperationsCount()-ops << ' ' << c.getDepth() << ' ' << elapsed_b.count() << ' ' << elapsed_c.count() << std::endl;
+  struct rusage usage;
+  getrusage(RUSAGE_SELF, &usage);
+  std::cout << elapsed_b.count() << ' ' << elapsed_c.count() << ' ' << log(usage.ru_maxrss*1000.0/128)/10.0 << std::endl;
   
-//   ops = a.getOperationsCount();
-//   for (auto i=b.begin(); i!=b.end(); i++)
-//     a.remove(i->first);
-//   std::cout << a.getNumElements() << ' ' << a.getStorageUsed() << ' ' << a.getOperationsCount()-ops << std::endl;
-  ops = c.getOperationsCount();
-  for (int i=0; i<count; i++) {
-    unsigned long long x = gen();
-    auto it = b.lower_bound(x);
-    if (it == b.end())
-      it = b.begin();
-    c.remove(it->first);
-    b.erase(it->first);
-  }
-  std::cout << c.getNumElements() << ' ' << c.getStorageUsed() << ' ' << c.getOperationsCount()-ops << std::endl;
+//   elapsed_b = std::chrono::duration<double>::zero();
+//   elapsed_c = std::chrono::duration<double>::zero();
+//   ops = c.getOperationsCount();
+//   for (int i=0; i<count; i++) {
+//     unsigned long long x = gen();
+//     auto it = b.lower_bound(x);
+//     if (it == b.end())
+//       it = b.begin();
+//     start = std::chrono::high_resolution_clock::now();
+//     c.remove(it->first);
+//     end = std::chrono::high_resolution_clock::now();
+//     elapsed_c += end - start;
+//     b.erase(it->first);
+//     start = std::chrono::high_resolution_clock::now();
+//     elapsed_b += start - end;
+//   }
+//   std::cout << c.getNumElements() << ' ' << c.getStorageUsed() << ' ' << c.getOperationsCount()-ops << ' ' << elapsed_b.count() << ' ' << elapsed_c.count() << std::endl;
+//   std::cout << elapsed_b.count()/count << ' ' << elapsed_c.count()/count << std::endl;
   
   return 0;
 }
