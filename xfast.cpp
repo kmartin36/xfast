@@ -9,7 +9,6 @@
 #include <ctime>
 #include <cmath>
 #include <unordered_map>
-#include <sparsehash/sparse_hash_map>
 #include <sys/resource.h>
 
 // Compile with: g++ -O3 -std=c++11 -I. -o xfast xfast.cpp
@@ -260,7 +259,8 @@ int main(int argc, char **argv) {
   // std::random_device rd;
   // std::mt19937_64 gen(rd());
   std::mt19937_64 gen(55);
-  std::cout << "N rb_insert(us) kf_insert(us) rb_lower_bound(us) kf_lower_bound(us) rusage(kB)" << std::endl;
+  // std::cout << "N rb_insert(us) kf_insert(us) rb_lower_bound(us) kf_lower_bound(us) rusage(kB)" << std::endl;
+  std::cout << "N kf_insert(us) kf_lower_bound(us) rusage(kB)" << std::endl;
   // std::cout << "N kf_insert(us) kf_lower_bound(us) rusage(kB) tree_depth" << std::endl;
   
   long tcount = 0;
@@ -281,7 +281,7 @@ int main(int argc, char **argv) {
       elapsed_c += start - end;
     }
 //     std::cout << c.getNumElements() << ' ' << c.getStorageUsed() << ' ' << c.getOperationsCount() << ' ' << elapsed_b.count() << ' ' << elapsed_c.count() << std::endl;
-    std::cout << tcount << ' ' << elapsed_b.count()*1000000/count << ' ' << elapsed_c.count()*1000000/count << ' ';
+    std::cout << tcount << ' ' << /*elapsed_b.count()*1000000/count << ' ' <<*/ elapsed_c.count()*1000000/count << ' ';
     
 //     elapsed_b = std::chrono::duration<double>::zero();
     elapsed_c = std::chrono::duration<double>::zero();
@@ -310,8 +310,7 @@ int main(int argc, char **argv) {
 //     std::cout << good << ' ' << c.getNumElements() << ' ' << c.getOperationsCount()-ops << ' ' << c.getDepth() << ' ' << elapsed_b.count() << ' ' << elapsed_c.count() << std::endl;
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
-    std::cout << elapsed_b.count() << ' ' << elapsed_c.count() << ' ' << usage.ru_maxrss << ' ' << c.getDepth() << std::endl;
-    std::cout << good << std::endl;
+    std::cout << /*elapsed_b.count() << ' ' <<*/ elapsed_c.count() << ' ' << usage.ru_maxrss << ' ' << c.getDepth() << ' ' << (good != 0) << std::endl;
   }
   
 //   elapsed_b = std::chrono::duration<double>::zero();
