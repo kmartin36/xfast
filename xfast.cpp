@@ -4,20 +4,21 @@
 #include <random>
 #include <vector>
 #include <limits>
-#include <map>
+#include <set>
 #include <chrono>
 #include <ctime>
 #include <cmath>
+#include <unordered_map>
 #include <sparsehash/sparse_hash_map>
 #include <sys/resource.h>
 
-// Compile with: g++ -O3 -std=c++11 -o xfast xfast.cpp
+// Compile with: g++ -O3 -std=c++11 -I. -o xfast xfast.cpp
 // Run with: ./xfast 1000000
 
 using std::cout;
 using std::endl;
 
-template <class key, class T>
+template <class key>
 class kfast {
 public:
   kfast(unsigned long long expected = 0) {accesses = 0; reserved = expected;}
@@ -25,9 +26,8 @@ public:
   key nearest(key x);
   key lower_bound(key x);
   key upper_bound(key x);
-  bool insert(key x, T y);
+  bool insert(key x);
   bool remove(key x);
-  T operator[](key x) {accesses++; return t0[x].second;};
   unsigned long long getOperationsCount() {return accesses;};
   std::size_t getNumElements() {return t0.size();};
   std::size_t getStorageUsed();
@@ -35,8 +35,8 @@ public:
   int clz(key x);
 
 private:
-  std::vector<google::sparse_hash_map<key, std::pair<key, key> > > tables;
-  google::sparse_hash_map<key, std::pair<std::pair<key, key>, T> > t0;
+  std::vector<std::unordered_map<key, std::pair<key, key> > > tables;
+  std::unordered_map<key, std::pair<key, key> > t0;
   std::pair<std::pair<key, key>, int> inner(key x);
   key closer(key x, std::pair<key, key> u);
   key near(key x);
@@ -44,8 +44,8 @@ private:
   unsigned long long reserved;
 };
 
-template <class key, class T>
-std::pair<std::pair<key, key>, int> kfast<key, T>::inner(key x) {
+template <class key>
+std::pair<std::pair<key, key>, int> kfast<key>::inner(key x) {
   if (t0.empty())
     throw;
   int l = 0, h = tables.size()-1;
@@ -67,8 +67,8 @@ std::pair<std::pair<key, key>, int> kfast<key, T>::inner(key x) {
   return std::make_pair(tables[l][(x >> (w-1-l)) >> 1], l);
 }
 
-template <class key, class T>
-key kfast<key, T>::closer(key x, std::pair<key, key> u) {
+template <class key>
+key kfast<key>::closer(key x, std::pair<key, key> u) {
   int i = clz(x ^ u.first);
   int j = clz(x ^ u.second);
   if (i > j)
@@ -80,15 +80,15 @@ key kfast<key, T>::closer(key x, std::pair<key, key> u) {
   return u.second;
 }
 
-template <class key, class T>
-key kfast<key, T>::near(key x) {
+template <class key>
+key kfast<key>::near(key x) {
   if (t0.empty())
     throw;
   return closer(x, inner(x).first);
 }
 
-template <class key, class T>
-int kfast<key, T>::clz(key x) {
+template <class key>
+int kfast<key>::clz(key x) {
   if (x == 0)
     return 8*sizeof(key);
   int i = 4*sizeof(key);
@@ -103,13 +103,13 @@ int kfast<key, T>::clz(key x) {
   return j;
 }
 
-template <class key, class T>
-key kfast<key, T>::nearest(key x) {
+template <class key>
+key kfast<key>::nearest(key x) {
   if (getNumElements() == 0)
     return std::numeric_limits<key>::max();
   key k = near(x);
   accesses++;
-  std::pair<key, key> u = t0[k].first;
+  std::pair<key, key> u = t0[k];
   if (k < x)
     if (x - k > u.second - x)
       return u.second;
@@ -120,36 +120,37 @@ key kfast<key, T>::nearest(key x) {
   return k;
 }
 
-template <class key, class T>
-key kfast<key, T>::lower_bound(key x) {
-  if (getNumElements() == 0)
+template <class key>
+key kfast<key>::lower_bound(key x) {
+  if (t0.empty())
     return std::numeric_limits<key>::max();
   key k = near(x);
   if (k < x) {
     accesses++;
-    k = t0[k].first.second;
+    k = t0[k].second;
   }
+  std::cout << " \b";
   return k;
 }
 
-template <class key, class T>
-key kfast<key, T>::upper_bound(key x) {
+template <class key>
+key kfast<key>::upper_bound(key x) {
   if (getNumElements() == 0)
     return std::numeric_limits<key>::max();
   key k = near(x);
   if (k <= x) {
     accesses++;
-    k = t0[k].first.second;
+    k = t0[k].second;
   }
   return k;
 }
 
-template <class key, class T>
-bool kfast<key, T>::insert(key x, T y) {
+template <class key>
+bool kfast<key>::insert(key x) {
   if (t0.empty()) {
     accesses++;
-    t0.resize(reserved);
-    t0.insert({x, std::make_pair(std::make_pair(x, x), y)});
+    t0.reserve(reserved);
+    t0.insert({x, std::make_pair(x, x)});
     tables.resize(tables.size() + 1);
     tables.back()[0] = std::make_pair(x, x);
     return true;
@@ -163,16 +164,16 @@ bool kfast<key, T>::insert(key x, T y) {
   int j = clz(x ^ k);
   i = std::min((int)tables.size()-1, j);
   
-  std::pair<key, key> u = t0[k].first;
+  std::pair<key, key> u = t0[k];
   key kh = (k < x) ? u.second : u.first;
   key kl = k;
   if (kl > x)
     std::swap(kl, kh);
-  t0[kl].first.second = x;
+  t0[kl].second = x;
   accesses++;
-  t0[kh].first.first = x;
+  t0[kh].first = x;
   accesses++;
-  t0.insert({x, std::make_pair(std::make_pair(kl, kh), y)});
+  t0.insert({x, std::make_pair(kl, kh)});
   
   const int w = 8 * sizeof(key);
   key x1 = x >> (w-1-i);
@@ -197,7 +198,7 @@ bool kfast<key, T>::insert(key x, T y) {
       double m = (double)(1UL << i);
       double n = reserved * 1.45;
       double s = m * (1.0 - 2.0*std::exp(n * std::log1p(-0.5/m)) + std::exp(n * std::log1p(-1.0/m)));
-      tables.back().resize(std::llround(s));
+      tables.back().reserve(std::llround(s));
     }
     tables.back()[(x >> (w-1-i)) >> 1] = v;
   }
@@ -205,8 +206,8 @@ bool kfast<key, T>::insert(key x, T y) {
   return true;
 }
 
-template <class key, class T>
-bool kfast<key, T>::remove(key x) {
+template <class key>
+bool kfast<key>::remove(key x) {
   if (t0.empty() || !contains(x))
     return false;
   
@@ -217,11 +218,11 @@ bool kfast<key, T>::remove(key x) {
     return true;
   }
   
-  std::pair<key, key> u = t0[x].first;
+  std::pair<key, key> u = t0[x];
   accesses++;
-  t0[u.first].first.second = u.second;
+  t0[u.first].second = u.second;
   accesses++;
-  t0[u.second].first.first = u.first;
+  t0[u.second].first = u.first;
   t0.erase(x);
   
   key k = closer(x, u);
@@ -245,8 +246,8 @@ bool kfast<key, T>::remove(key x) {
   return true;
 }
 
-template <class key, class T>
-std::size_t kfast<key, T>::getStorageUsed() {
+template <class key>
+std::size_t kfast<key>::getStorageUsed() {
   std::size_t s = getNumElements();
   for (auto t : tables)
     s += t.size();
@@ -254,70 +255,63 @@ std::size_t kfast<key, T>::getStorageUsed() {
 }
 
 int main(int argc, char **argv) {
-  std::map<unsigned long long, unsigned long long> b;
-  kfast<unsigned long long, unsigned long long> c(atol(argv[argc-1]));
-  std::random_device rd;
-  std::mt19937_64 gen(rd());
-  std::chrono::time_point<std::chrono::high_resolution_clock> start, end;
-  std::chrono::duration<double> elapsed_b(0.0), elapsed_c(0.0);
-//   std::cout << "N rb_insert(us) kf_insert(us) rb_lower_bound(us) kf_lower_bound(us) rusage(kB)" << std::endl;
-  std::cout << "N kf_insert(us) kf_lower_bound(us) rusage(kB) tree_depth" << std::endl;
-  
-//   for (unsigned long long i = 0; i<60; i++) {
-//     double m = (double)(1UL << i);
-//     double n = atol(argv[argc-1]) * 1.45;
-//     double s = m * (1.0 - 2.0*std::exp(n * std::log1p(-0.5/m)) + std::exp(n * std::log1p(-1.0/m)));
-//     std::cout << std::llround(s) << ' ';
-//   }
-//   std::cout << std::endl;
+  // std::set<unsigned long long> b;
+  kfast<unsigned long long> c(atol(argv[argc-1]));
+  // std::random_device rd;
+  // std::mt19937_64 gen(rd());
+  std::mt19937_64 gen(55);
+  std::cout << "N rb_insert(us) kf_insert(us) rb_lower_bound(us) kf_lower_bound(us) rusage(kB)" << std::endl;
+  // std::cout << "N kf_insert(us) kf_lower_bound(us) rusage(kB) tree_depth" << std::endl;
   
   long tcount = 0;
   while (*++argv) {
     long count = atol(*argv) - tcount;
     tcount += count;
+    std::chrono::time_point<std::chrono::high_resolution_clock> start, end;
+    std::chrono::duration<double> elapsed_b(0.0), elapsed_c(0.0);
     for (long i=0; i<count; i++) {
       unsigned long long k = gen();
 //       k = k * 2862933555777941757UL + 3037000493UL;
-//       start = std::chrono::high_resolution_clock::now();
-//       b.emplace(k, k);
+      // start = std::chrono::high_resolution_clock::now();
+      // b.emplace(k);
       end = std::chrono::high_resolution_clock::now();
-//       elapsed_b += end - start;
-      c.insert(k, k);
+      // elapsed_b += end - start;
+      c.insert(k);
       start = std::chrono::high_resolution_clock::now();
       elapsed_c += start - end;
     }
 //     std::cout << c.getNumElements() << ' ' << c.getStorageUsed() << ' ' << c.getOperationsCount() << ' ' << elapsed_b.count() << ' ' << elapsed_c.count() << std::endl;
-    std::cout << tcount << ' ' << /*elapsed_b.count()*1000000/count << ' ' <<*/ elapsed_c.count()*1000000/count << ' ';
+    std::cout << tcount << ' ' << elapsed_b.count()*1000000/count << ' ' << elapsed_c.count()*1000000/count << ' ';
     
 //     elapsed_b = std::chrono::duration<double>::zero();
     elapsed_c = std::chrono::duration<double>::zero();
     unsigned long long ops = c.getOperationsCount();
-    unsigned long long good = 0;
+    volatile unsigned long long good = 0;
     for (int i=0; i<1000000; i++) {
       unsigned long long x = gen(), k0, k1;
 //       unsigned long long x = k, k0, k1;
 //       k = k * 2862933555777941757UL + 3037000493UL;
       start = std::chrono::high_resolution_clock::now();
       k0 = c.lower_bound(x);
+      good += k0;
       end = std::chrono::high_resolution_clock::now();
       elapsed_c += end - start;
-//       auto it = b.lower_bound(x);
-//       start = std::chrono::high_resolution_clock::now();
-//       elapsed_b += start - end;
-//       if (it == b.end())
-//         it = b.begin();
-//       k1 = it->first;
-//       if (k0 == k1)
-//         good++;
-//       else
-//         printf("%016llx %016llx %016llx\n", k0, k1, x);
-  }
+      // auto it = b.lower_bound(x);
+      // start = std::chrono::high_resolution_clock::now();
+      // elapsed_b += start - end;
+      // if (it == b.end())
+      //   it = b.begin();
+      // k1 = *it;
+      // if (k0 == k1)
+      //   good++;
+      // else
+      //   printf("%016llx %016llx %016llx\n", k0, k1, x);
+    }
 //     std::cout << good << ' ' << c.getNumElements() << ' ' << c.getOperationsCount()-ops << ' ' << c.getDepth() << ' ' << elapsed_b.count() << ' ' << elapsed_c.count() << std::endl;
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
-    std::cout << /*elapsed_b.count() << ' ' <<*/ elapsed_c.count() << ' ' << usage.ru_maxrss << ' ' << c.getDepth() << std::endl;
-    elapsed_b = std::chrono::duration<double>::zero();
-    elapsed_c = std::chrono::duration<double>::zero();
+    std::cout << elapsed_b.count() << ' ' << elapsed_c.count() << ' ' << usage.ru_maxrss << ' ' << c.getDepth() << std::endl;
+    std::cout << good << std::endl;
   }
   
 //   elapsed_b = std::chrono::duration<double>::zero();
