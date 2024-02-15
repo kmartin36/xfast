@@ -9,7 +9,7 @@
 #include <cmath>
 #include <sys/resource.h>
 
-// Compile with: g++ -O3 -std=c++11 -o ktrie ktrie.cpp
+// Compile with: g++ -O3 -std=c++17 -o ktrie ktrie.cpp
 // Run with: ./ktrie 1000000
 
 using std::cout;
@@ -18,50 +18,36 @@ using std::endl;
 template <class key>
 class ktrie {
 public:
-  ktrie(std::size_t expected = 1) {
-    expected = std::max(expected, (std::size_t)1);
-    shift = __builtin_clzll(expected-1);
-    mask = ~((1ULL << shift) - 1);
-    count = 0;
-    tbl.resize(a(mask) + 1);
+  ktrie() : shift(8 * sizeof(key)), mask(0), count(0), tbl({{}}) {}
+  constexpr bool contains(key x) {return tbl[a(x)].count() > 0;}
+  constexpr key lower_bound(key x) {
+    auto &t = tbl[a(x)];
+    auto i = t.lower_bound(b(x));
+    return inner_bound(mask & x, t, i);
   }
-  bool contains(key x) {return tbl[a(x)].count() > 0;};
-  key lower_bound(key x) {
-    auto i = tbl[a(x)].lower_bound(b(x));
-    if (i != tbl[a(x)].end())
-      return *i | (mask & x);
-    for (auto i=tbl.begin() + a(x)+1; i!=tbl.end(); i++)
-      if (!i->empty())
-        return *i->begin() | ((i-tbl.begin())<<shift);
-    return std::numeric_limits<key>::max();
-  }
-  key upper_bound(key x) {
-    auto i = tbl[a(x)].upper_bound(b(x));
-    if (i != tbl[a(x)].end())
-      return *i | (mask & x);
-    for (auto i=tbl.begin() + a(x)+1; i!=tbl.end(); i++)
-      if (!i->empty())
-        return *i->begin() | ((i-tbl.begin())<<shift);
-    return std::numeric_limits<key>::max();
+  constexpr key upper_bound(key x) {
+    auto &t = tbl[a(x)];
+    auto i = t.upper_bound(b(x));
+    return inner_bound(mask & x, t, i);
   }
   bool insert(key x) {
     if (!tbl[a(x)].emplace(b(x)).second)
       return false;
-    if (count == (mask >> shift)) {
+    if (count == (mask >> (shift-1))+1) {
       // resize the array
       shift--;
-      mask |= 1ULL << shift;
-      std::size_t s = tbl.size();
+      mask |= ((key)1) << shift;
       tbl.resize(a(mask)+1);
-      for (std::size_t i=s; --i;) {
+      for (std::size_t i = ((mask>>shift)>>1)+1; --i;) {
         for (auto j : tbl[i]) {
           key c = (i << (shift+1)) | j;
           tbl[a(c)].emplace_hint(tbl[a(c)].end(), b(c));
         }
         tbl[i].clear();
       }
-      auto i = tbl[0].lower_bound(((key)1) << shift);
-      tbl[1].insert(i, tbl[0].end());
+      auto i = tbl[0].lower_bound(-mask);
+      for (auto j=i; j!=tbl[0].end(); j++)
+        tbl[1].emplace_hint(tbl[1].end(), b(*j));
       tbl[0].erase(i, tbl[0].end());
     }
     count++;
@@ -71,7 +57,7 @@ public:
     std::size_t s = tbl[a(x)].erase(b(x));
     if (s == 0)
       return false;
-    if (mask && count == (mask ^ (mask >> 1))) {
+    if (mask && count == -(mask >> 1)) {
       // resize the array
       mask <<= 1;
       shift++;
@@ -89,10 +75,8 @@ public:
     return true;
   }
   std::size_t getDepth() {
-    std::size_t s=0;
-    for (auto const &i : tbl)
-      s = std::max(s, i.size());
-    return s;
+    auto f = [] (const std::set<key> &i) {return i.size();};
+    return std::transform_reduce(tbl.cbegin(), tbl.cend(), 0, std::max<std::size_t>, f);
   }
 
 private:
@@ -100,59 +84,81 @@ private:
   key mask;
   std::size_t count;
   uint8_t shift;
-  key a(key x) {return (x & mask) >> shift;};
-  key b(key x) {return x & (~mask);};
+  constexpr key a(key x) {return (x & mask) >> shift;};
+  constexpr key b(key x) {return x & (~mask);};
+  typedef typename std::set<key>::const_iterator set_iter;
+  constexpr key inner_bound(key x, const std::set<key> &t, set_iter &i) {
+    if (i != t.end())
+      return *i | x;
+    for (x-=mask; x; x-=mask)
+      if (!tbl[x>>shift].empty())
+        return *tbl[x>>shift].begin() | x;
+    return std::numeric_limits<key>::max();
+  }
 };
 
+#undef doTest
+#define doTest
+
 int main(int argc, char **argv) {
-  // std::set<unsigned long long> b;
-  ktrie<unsigned long long> c;
-//   std::random_device rd;
+  using namespace std::chrono_literals;
+  using std::chrono::high_resolution_clock;
+  typedef unsigned long long key;
+  #ifdef doTest
+  std::set<key> b;
+  #endif
+  ktrie<key> c;
+  // std::random_device rd;
   std::mt19937_64 gen(55);
-  std::chrono::time_point<std::chrono::high_resolution_clock> start, end;
+  high_resolution_clock::time_point start = high_resolution_clock::now(), end;
   std::chrono::duration<double> elapsed_b(0.0), elapsed_c(0.0);
-  std::cout << "N rb_insert(us) kt_insert(us) rb_lower_bound(us) kt_lower_bound(us) rusage(kB) tree_depth" << std::endl;
+  cout << "N rb_insert(us) kt_insert(us) rb_lower_bound(us) kt_lower_bound(us) "
+          "rusage(kB) tree_depth all_good" << endl;
   
   long tcount = 0;
   while (*++argv) {
     long count = atol(*argv) - tcount;
     tcount += count;
     for (long i=0; i<count; i++) {
-      unsigned long long k = gen();
-      // start = std::chrono::high_resolution_clock::now();
-      // b.emplace(k);
-      end = std::chrono::high_resolution_clock::now();
-      // elapsed_b += end - start;
+      key k = gen();
+      #ifdef doTest
+      start = high_resolution_clock::now();
+      b.emplace(k);
+      #endif
+      end = high_resolution_clock::now();
+      elapsed_b += end - start;
       c.insert(k);
-      start = std::chrono::high_resolution_clock::now();
+      start = high_resolution_clock::now();
       elapsed_c += start - end;
     }
-    std::cout << tcount << ' ' << elapsed_b.count()*1000000/count << ' ' << elapsed_c.count()*1000000/count << ' ';
-    elapsed_b = elapsed_c = std::chrono::duration<double>::zero();
-    unsigned long long good = 0;
+    double scale = 1000000 / count;
+    cout << tcount << ' ' << elapsed_b.count()*scale << ' ' << elapsed_c.count()*scale << ' ';
+    elapsed_b = elapsed_c = 0s;
+    bool good = true;
+    int toPrint = 10;
     for (int i=0; i<1000000; i++) {
-      unsigned long long x = gen(), k0, k1;
-      start = std::chrono::high_resolution_clock::now();
+      key x = gen(), k0, k1;
+      start = high_resolution_clock::now();
       k0 = c.lower_bound(x);
-      end = std::chrono::high_resolution_clock::now();
-      good += k0;
+      end = high_resolution_clock::now();
       elapsed_c += end - start;
-      // auto it = b.lower_bound(x);
-      // start = std::chrono::high_resolution_clock::now();
-      // elapsed_b += start - end;
-      // if (it == b.end())
-      //   k1 = std::numeric_limits<unsigned long long>::max();
-      // else
-      //   k1 = *it;
-      // if (k0 == k1)
-      //   good++;
-      // else
-      //   printf("%016llx %016llx %016llx\n", k0, k1, x);
+      #ifndef doTest
+      good &= k0 != 0;
+      #else
+      auto it = b.lower_bound(x);
+      start = high_resolution_clock::now();
+      elapsed_b += start - end;
+      k1 = it == b.end() ? std::numeric_limits<key>::max() : *it;
+      good &= k0 == k1;
+      if (k0 != k1 && toPrint--)
+        printf("%016llx %016llx %016llx\n", k0, k1, x);
+      #endif
     }
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
-    std::cout << elapsed_b.count() << ' ' << elapsed_c.count() << ' ' << usage.ru_maxrss << ' ' << c.getDepth() << ' ' << (good != 0) << std::endl;
-    elapsed_c = std::chrono::duration<double>::zero();
+    cout << elapsed_b.count() << ' ' << elapsed_c.count() << ' ' << usage.ru_maxrss << ' '
+         << c.getDepth() << ' ' << good << endl;
+    elapsed_b = elapsed_c = 0s;
   }
   
   return 0;
