@@ -7,6 +7,7 @@
 #include <chrono>
 #include <ctime>
 #include <cmath>
+#include <iterator>
 #include <sys/resource.h>
 
 // Compile with: g++ -O3 -std=c++17 -o ktrie ktrie.cpp
@@ -15,10 +16,79 @@
 using std::cout;
 using std::endl;
 
+template <class T>
+class extVec {
+  class extIter {
+public:
+    using iterator_category = std::random_access_iterator_tag;
+    using difference_type   = std::ptrdiff_t;
+    using value_type        = T;
+    using pointer           = T*;
+    using reference         = T&;
+    extIter() : i(0), a(nullptr) {}
+    extIter(std::size_t Idx, extVec<T> *Vec) : i(Idx), a(Vec) {}
+    extIter(const extIter &it) : i(it.i), a(it,a) {}
+    extIter operator=(const extIter &it) {i=it.i; a=it.a;}
+    reference operator*() const { return (*a)[i]; }
+    pointer operator->() { return &(*a)[i]; }
+    reference operator[](difference_type n) const { return (*a)[i+n]; }
+    extIter& operator++() { i++; return *this; }
+    extIter operator++(int) { extIter tmp = *this; i++; return tmp; }
+    extIter& operator--() { i--; return *this; }
+    extIter operator--(int) { extIter tmp = *this; i--; return tmp; }
+    extIter& operator+=(difference_type n) { i+=n; return *this; }
+    extIter& operator-=(difference_type n) { i-=n; return *this; }
+    friend bool operator==(const extIter& a, const extIter& b) { return a.a == b.a && a.i == b.i; }
+    friend bool operator!=(const extIter& a, const extIter& b) { return a.a != b.a || a.i != b.i; }
+    friend bool operator<(const extIter& a, const extIter& b) { return a.i < b.i; }
+    friend bool operator>(const extIter& a, const extIter& b) { return a.i > b.i; }
+    friend bool operator<=(const extIter& a, const extIter& b) { return a.i <= b.i; }
+    friend bool operator>=(const extIter& a, const extIter& b) { return a.i >= b.i; }
+    friend extIter operator+(const extIter& it, difference_type n) { extIter tmp = it; tmp+=n; return tmp; }
+    friend extIter operator+(difference_type n, const extIter& it) { return it + n; }
+    friend extIter operator-(const extIter& it, difference_type n) { extIter tmp = it; tmp-=n; return tmp; }
+    friend extIter operator-(difference_type n, const extIter& it) { return it - n; }
+    friend difference_type operator-(const extIter& lhs, const extIter& rhs) { return lhs.i - rhs.i; }
+private:
+    std::size_t i;
+    extVec<T> *a;
+  };
+public:
+  extVec(std::size_t count) {tbl.reserve(8*sizeof(std::size_t) + 1);resize(count);}
+  ~extVec() {tbl.clear();}
+  std::size_t size() {return tbl.empty() ? 0 : a();}
+  void resize(std::size_t count) {
+    if (!count) {
+      tbl.clear();
+      return;
+    }
+    if (tbl.empty())
+      tbl.push_back(new T [1]);
+    for (std::size_t sz = a(); sz < count; sz <<= 1) {
+      tbl.push_back(new T [sz]);
+    }
+    for (std::size_t sz = a(); sz > count; sz >>= 1) {
+      delete[] tbl.back();
+      tbl.pop_back();
+    }
+  }
+  T& operator[](std::size_t pos) {
+    if (pos == 0)
+      return tbl[0][0];
+    uint8_t shift = __builtin_clzll(pos);
+    return tbl[64-shift][pos & ((~0ULL >> shift) >> 1)];
+  }
+  extIter begin() { return extIter((std::size_t)0, this); }
+  extIter end() { return extIter(size(), this); }
+private:
+  std::vector<T*> tbl;
+  constexpr std::size_t a() {return ((std::size_t)1)<<(tbl.size()-1);};
+};
+
 template <class key>
 class ktrie {
 public:
-  ktrie() : shift(8 * sizeof(key)), mask(0), count(0), tbl({{}}) {}
+  ktrie() : shift(8 * sizeof(key)), mask(0), count(0), tbl(1) {}
   constexpr bool contains(key x) {return tbl[a(x)].count() > 0;}
   constexpr key lower_bound(key x) {
     auto &t = tbl[a(x)];
@@ -76,14 +146,15 @@ public:
   }
   std::size_t getDepth() {
     auto f = [] (const std::set<key> &i) {return i.size();};
-    return std::transform_reduce(tbl.cbegin(), tbl.cend(), 0, std::max<std::size_t>, f);
+    return std::transform_reduce(tbl.begin(), tbl.end(), 0, std::max<std::size_t>, f);
+    return 1;
   }
 
 private:
-  std::vector<std::set<key> > tbl;
+  extVec<std::set<key> > tbl;
+  // std::vector<std::set<key> > tbl;
   key mask;
-  std::size_t count;
-  uint8_t shift;
+  std::size_t count, shift;
   constexpr key a(key x) {return (x & mask) >> shift;};
   constexpr key b(key x) {return x & (~mask);};
   typedef typename std::set<key>::const_iterator set_iter;
@@ -123,7 +194,7 @@ int main(int argc, char **argv) {
       key k = gen();
       #ifdef doTest
       start = high_resolution_clock::now();
-      b.emplace(k);
+      b.insert(k);
       #endif
       end = high_resolution_clock::now();
       elapsed_b += end - start;
@@ -131,7 +202,7 @@ int main(int argc, char **argv) {
       start = high_resolution_clock::now();
       elapsed_c += start - end;
     }
-    double scale = 1000000 / count;
+    double scale = 1000000.0 / count;
     cout << tcount << ' ' << elapsed_b.count()*scale << ' ' << elapsed_c.count()*scale << ' ';
     elapsed_b = elapsed_c = 0s;
     bool good = true;
