@@ -18,45 +18,46 @@ using std::endl;
 
 template <class T>
 class extVec {
-  class extIter {
+public:
+  class iterator {
 public:
     using iterator_category = std::random_access_iterator_tag;
     using difference_type   = std::ptrdiff_t;
     using value_type        = T;
     using pointer           = T*;
     using reference         = T&;
-    extIter() : i(0), a(nullptr) {}
-    extIter(std::size_t Idx, extVec<T> *Vec) : i(Idx), a(Vec) {}
-    extIter(const extIter &it) : i(it.i), a(it,a) {}
-    extIter operator=(const extIter &it) {i=it.i; a=it.a;}
+    iterator() : i(0), a(nullptr) {}
+    iterator(std::size_t Idx, extVec<T> *Vec) : i(Idx), a(Vec) {}
+    iterator(const iterator &it) : i(it.i), a(it.a) {}
+    iterator operator=(const iterator &it) {i=it.i; a=it.a; return *this; }
     reference operator*() const { return (*a)[i]; }
     pointer operator->() { return &(*a)[i]; }
     reference operator[](difference_type n) const { return (*a)[i+n]; }
-    extIter& operator++() { i++; return *this; }
-    extIter operator++(int) { extIter tmp = *this; i++; return tmp; }
-    extIter& operator--() { i--; return *this; }
-    extIter operator--(int) { extIter tmp = *this; i--; return tmp; }
-    extIter& operator+=(difference_type n) { i+=n; return *this; }
-    extIter& operator-=(difference_type n) { i-=n; return *this; }
-    friend bool operator==(const extIter& a, const extIter& b) { return a.a == b.a && a.i == b.i; }
-    friend bool operator!=(const extIter& a, const extIter& b) { return a.a != b.a || a.i != b.i; }
-    friend bool operator<(const extIter& a, const extIter& b) { return a.i < b.i; }
-    friend bool operator>(const extIter& a, const extIter& b) { return a.i > b.i; }
-    friend bool operator<=(const extIter& a, const extIter& b) { return a.i <= b.i; }
-    friend bool operator>=(const extIter& a, const extIter& b) { return a.i >= b.i; }
-    friend extIter operator+(const extIter& it, difference_type n) { extIter tmp = it; tmp+=n; return tmp; }
-    friend extIter operator+(difference_type n, const extIter& it) { return it + n; }
-    friend extIter operator-(const extIter& it, difference_type n) { extIter tmp = it; tmp-=n; return tmp; }
-    friend extIter operator-(difference_type n, const extIter& it) { return it - n; }
-    friend difference_type operator-(const extIter& lhs, const extIter& rhs) { return lhs.i - rhs.i; }
+    iterator& operator++() { i++; return *this; }
+    iterator operator++(int) { iterator tmp = *this; i++; return tmp; }
+    iterator& operator--() { i--; return *this; }
+    iterator operator--(int) { iterator tmp = *this; i--; return tmp; }
+    iterator& operator+=(difference_type n) { i+=n; return *this; }
+    iterator& operator-=(difference_type n) { i-=n; return *this; }
+    friend bool operator==(const iterator& a, const iterator& b) { return a.a == b.a && a.i == b.i; }
+    friend bool operator!=(const iterator& a, const iterator& b) { return a.a != b.a || a.i != b.i; }
+    friend bool operator<(const iterator& a, const iterator& b) { return a.i < b.i; }
+    friend bool operator>(const iterator& a, const iterator& b) { return a.i > b.i; }
+    friend bool operator<=(const iterator& a, const iterator& b) { return a.i <= b.i; }
+    friend bool operator>=(const iterator& a, const iterator& b) { return a.i >= b.i; }
+    friend iterator operator+(const iterator& it, difference_type n) { iterator tmp = it; tmp+=n; return tmp; }
+    friend iterator operator+(difference_type n, const iterator& it) { return it + n; }
+    friend iterator operator-(const iterator& it, difference_type n) { iterator tmp = it; tmp-=n; return tmp; }
+    friend iterator operator-(difference_type n, const iterator& it) { return it - n; }
+    friend difference_type operator-(const iterator& lhs, const iterator& rhs) { return lhs.i - rhs.i; }
 private:
     std::size_t i;
     extVec<T> *a;
   };
-public:
   extVec(std::size_t count) {tbl.reserve(8*sizeof(std::size_t) + 1);resize(count);}
   ~extVec() {tbl.clear();}
   std::size_t size() {return tbl.empty() ? 0 : a();}
+  void clear() {tbl.clear();}
   void resize(std::size_t count) {
     if (!count) {
       tbl.clear();
@@ -78,8 +79,9 @@ public:
     uint8_t shift = __builtin_clzll(pos);
     return tbl[64-shift][pos & ((~0ULL >> shift) >> 1)];
   }
-  extIter begin() { return extIter((std::size_t)0, this); }
-  extIter end() { return extIter(size(), this); }
+  iterator begin() { return iterator((std::size_t)0, this); }
+  iterator end() { return iterator(size(), this); }
+  void swap(extVec &other) {tbl.swap(other.tbl);}
 private:
   std::vector<T*> tbl;
   constexpr std::size_t a() {return ((std::size_t)1)<<(tbl.size()-1);};
@@ -87,29 +89,76 @@ private:
 
 template <class key>
 class ktrie {
+private:
+  typedef extVec<std::set<key> > vecT;
+  // typedef std::vector<std::set<key> > vecT;
+
 public:
-  ktrie() : shift(8 * sizeof(key)), mask(0), count(0), tbl(1) {}
-  constexpr bool contains(key x) {return tbl[a(x)].count() > 0;}
-  constexpr key lower_bound(key x) {
-    auto &t = tbl[a(x)];
-    auto i = t.lower_bound(b(x));
-    return inner_bound(mask & x, t, i);
-  }
-  constexpr key upper_bound(key x) {
-    auto &t = tbl[a(x)];
-    auto i = t.upper_bound(b(x));
-    return inner_bound(mask & x, t, i);
-  }
-  bool insert(key x) {
-    if (!tbl[a(x)].emplace(b(x)).second)
-      return false;
-    if (count == (mask >> (shift-1))+1) {
+  class iterator {
+public:
+    typedef typename vecT::iterator T0;
+    typedef typename std::set<key>::iterator T1;
+    using iterator_category = std::bidirectional_iterator_tag;
+    using difference_type   = std::ptrdiff_t;
+    using value_type        = key;
+    using pointer           = key*;
+    using reference         = key&;
+    iterator() {}
+    iterator(T0 iTop, T1 iBot, T0 End, std::size_t shiftIn) : i0(iTop), i1(iBot), end(End), shift(shiftIn) {
+      mask = (~(key)0) << shift;
+      while (i0 != end && i1 == i0->end() && ++i0 != end)
+        i1 = i0->begin();
+    }
+    iterator(const iterator &it) : i0(it.i0), i1(it.i1), end(it.end), shift(it.shift), mask(it.mask) {}
+    iterator operator=(const iterator &it) {i0=it.i0; i1=it.i1; end=it.end; shift=it.shift; mask=it.mask; return *this;}
+    reference operator*() {k = i0-end; k = (k << shift) | *i1; return k;}
+    pointer operator->() {return &*this;}
+    iterator& operator++() {
+      if (i0 == end)
+        return *this;
+      if (i1 != i0->end())
+        ++i1;
+      while (i1==i0->end() && ++i0 != end)
+        i1 = i0->begin();
+      return *this;
+    }
+    iterator operator++(int) {iterator tmp = *this; ++*this; return tmp;}
+    iterator& operator--() {
+      if (i0 == end)
+        return *this;
+      if (i1 != i0->end())
+        --i1;
+      while (i1 == i0->end() && --i0 != end)
+        i1 = i0->begin();
+      return *this;
+    }
+    iterator operator--(int) {iterator tmp = *this; --*this; return tmp;}
+    friend bool operator==(const iterator& a, const iterator& b) { return a.i0 == b.i0 && (a.i1 == b.i1 || a.i0 == a.end); }
+    friend bool operator!=(const iterator& a, const iterator& b) { return !(a == b); }
+    T0 i0, end;
+    T1 i1;
+    std::size_t shift;
+    key k, mask;
+  };
+  ktrie() : shift(8 * sizeof(key)), mask(0), sz(0), tbl(1) {}
+  ktrie& operator=(const ktrie& other) {tbl=other.tbl; mask=other.mask; sz=other.sz; shift=other.shift;}
+  iterator begin() {return iterator(tbl.begin(), tbl[0].begin(), tbl.end(), shift);}
+  iterator end() {return iterator(tbl.end(), tbl[mask >> shift].end(), tbl.end(), shift);}
+  bool empty() const {return sz == 0;}
+  std::size_t size() const {return sz;}
+  void clear() {tbl.clear();}
+  std::pair<iterator, bool> insert(key x) {
+    auto i0 = tbl.begin() + a(x);
+    auto i1 = i0->emplace(b(x));
+    if (!i1.second)
+      return std::make_pair(iterator(i0, i1.first, tbl.end(), shift), false);
+    if (sz == (mask >> (shift-1))+1) {
       // resize the array
       shift--;
       mask |= ((key)1) << shift;
       tbl.resize(a(mask)+1);
       for (std::size_t i = ((mask>>shift)>>1)+1; --i;) {
-        for (auto j : tbl[i]) {
+        for (auto &j : tbl[i]) {
           key c = (i << (shift+1)) | j;
           tbl[a(c)].emplace_hint(tbl[a(c)].end(), b(c));
         }
@@ -120,14 +169,15 @@ public:
         tbl[1].emplace_hint(tbl[1].end(), b(*j));
       tbl[0].erase(i, tbl[0].end());
     }
-    count++;
-    return true;
+    sz++;
+    i0 = tbl.begin() + a(x);
+    return std::make_pair(iterator(i0, i0->find(b(x)), tbl.end(), shift), true);
   }
-  bool remove(key x) {
+  std::size_t erase(const key& x) {
     std::size_t s = tbl[a(x)].erase(b(x));
     if (s == 0)
-      return false;
-    if (mask && count == -(mask >> 1)) {
+      return 0;
+    if (mask && sz == -(mask >> 1)) {
       // resize the array
       mask <<= 1;
       shift++;
@@ -141,8 +191,29 @@ public:
       }
       tbl.resize(a(mask)+1);
     }
-    count--;
-    return true;
+    sz--;
+    return 1;
+  }
+  void swap(ktrie &other) {
+    tbl.swap(other.tbl);
+    std::swap(mask, other.mask);
+    std::swap(sz, other.sz);
+    std::swap(shift, other.shift);
+  }
+  std::size_t count(const key& x) const {return contains(x);}
+  iterator find(const key& x) {auto i = tbl.begin() + a(x); return iterator(i, i->find(x), tbl.end());}
+  bool contains(const key& x) const {return tbl[a(x)].count(x) > 0;}
+  std::pair<iterator, iterator> equal_range(const key& x) {
+    auto i=lower_bound(x);
+    return std::make_pair(i, *i != x ? i : i+1);
+  }
+  iterator lower_bound(const key& x) {
+    auto i = tbl.begin() + a(x);
+    return iterator(i, i->lower_bound(b(x)), tbl.end(), shift);
+  }
+  iterator upper_bound(const key& x) {
+    auto i = tbl.begin() + a(x);
+    return iterator(i, i->upper_bound(b(x)), tbl.end(), shift);
   }
   std::size_t getDepth() {
     auto f = [] (const std::set<key> &i) {return i.size();};
@@ -151,21 +222,11 @@ public:
   }
 
 private:
-  extVec<std::set<key> > tbl;
-  // std::vector<std::set<key> > tbl;
+  vecT tbl;
   key mask;
-  std::size_t count, shift;
+  std::size_t sz, shift;
   constexpr key a(key x) {return (x & mask) >> shift;};
   constexpr key b(key x) {return x & (~mask);};
-  typedef typename std::set<key>::const_iterator set_iter;
-  constexpr key inner_bound(key x, const std::set<key> &t, set_iter &i) {
-    if (i != t.end())
-      return *i | x;
-    for (x-=mask; x; x-=mask)
-      if (!tbl[x>>shift].empty())
-        return *tbl[x>>shift].begin() | x;
-    return std::numeric_limits<key>::max();
-  }
 };
 
 #undef doTest
@@ -210,19 +271,22 @@ int main(int argc, char **argv) {
     for (int i=0; i<1000000; i++) {
       key x = gen(), k0, k1;
       start = high_resolution_clock::now();
-      k0 = c.lower_bound(x);
+      auto it0 = c.lower_bound(x);
       end = high_resolution_clock::now();
       elapsed_c += end - start;
+      k0 = it0 == c.end() ? std::numeric_limits<key>::max() : *it0;
       #ifndef doTest
       good &= k0 != 0;
       #else
-      auto it = b.lower_bound(x);
+      auto it1 = b.lower_bound(x);
       start = high_resolution_clock::now();
       elapsed_b += start - end;
-      k1 = it == b.end() ? std::numeric_limits<key>::max() : *it;
+      k1 = it1 == b.end() ? std::numeric_limits<key>::max() : *it1;
       good &= k0 == k1;
-      if (k0 != k1 && toPrint--)
+      if (k0 != k1 && toPrint) {
         printf("%016llx %016llx %016llx\n", k0, k1, x);
+        --toPrint;
+      }
       #endif
     }
     struct rusage usage;
