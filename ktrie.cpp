@@ -104,46 +104,46 @@ public:
     using pointer           = key*;
     using reference         = key&;
     iterator() {}
-    iterator(T0 iTop, T1 iBot, T0 End, std::size_t shiftIn) : i0(iTop), i1(iBot), end(End), shift(shiftIn) {
-      mask = (~(key)0) << shift;
-      while (i0 != end && i1 == i0->end() && ++i0 != end)
-        i1 = i0->begin();
-    }
-    iterator(const iterator &it) : i0(it.i0), i1(it.i1), end(it.end), shift(it.shift), mask(it.mask) {}
-    iterator operator=(const iterator &it) {i0=it.i0; i1=it.i1; end=it.end; shift=it.shift; mask=it.mask; return *this;}
-    reference operator*() {k = i0-end; k = (k << shift) | *i1; return k;}
+    iterator(T0 iTop, T1 iBot, ktrie &ikt) : i0(iTop), i1(iBot), kt(ikt) {normalize();}
+    iterator(const iterator &it) : i0(it.i0), i1(it.i1), kt(it.kt) {normalize();}
+    iterator operator=(const iterator &it) {i0=it.i0; i1=it.i1; kt = i0.kt; normalize(); return *this;}
+    reference operator*() {k = i0-kt.tbl.end(); k = (k << kt.shift) | *i1; return k;}
     pointer operator->() {return &*this;}
     iterator& operator++() {
-      if (i0 == end)
+      if (i0 == kt.tbl.end())
         return *this;
       if (i1 != i0->end())
         ++i1;
-      while (i1==i0->end() && ++i0 != end)
+      while (i1==i0->end() && ++i0 != kt.tbl.end())
         i1 = i0->begin();
       return *this;
     }
     iterator operator++(int) {iterator tmp = *this; ++*this; return tmp;}
     iterator& operator--() {
-      if (i0 == end)
-        return *this;
-      if (i1 != i0->end())
+      while (i1 == i0->begin() && i0 != kt.tbl.begin())
+        i1 = (--i0)->end();
+      if (i1 != i0->begin())
         --i1;
-      while (i1 == i0->end() && --i0 != end)
-        i1 = i0->begin();
       return *this;
     }
     iterator operator--(int) {iterator tmp = *this; --*this; return tmp;}
-    friend bool operator==(const iterator& a, const iterator& b) { return a.i0 == b.i0 && (a.i1 == b.i1 || a.i0 == a.end); }
+    friend bool operator==(const iterator& a, const iterator& b) { return a.i0 == b.i0 && (a.i1 == b.i1 || a.i0 == a.kt.tbl.end()); }
     friend bool operator!=(const iterator& a, const iterator& b) { return !(a == b); }
-    T0 i0, end;
+    T0 i0;
     T1 i1;
-    std::size_t shift;
-    key k, mask;
+    key k;
+    ktrie &kt;
+    void normalize() {
+      while (i0 != kt.tbl.end() && i1 == i0->end() && ++i0 != kt.tbl.end())
+        i1 = i0->begin();
+    }
   };
   ktrie() : shift(8 * sizeof(key)), mask(0), sz(0), tbl(1) {}
   ktrie& operator=(const ktrie& other) {tbl=other.tbl; mask=other.mask; sz=other.sz; shift=other.shift;}
-  iterator begin() {return iterator(tbl.begin(), tbl[0].begin(), tbl.end(), shift);}
-  iterator end() {return iterator(tbl.end(), tbl[mask >> shift].end(), tbl.end(), shift);}
+  iterator begin() {return iterator(tbl.begin(), tbl[0].begin(), *this);}
+  iterator end() {return iterator(tbl.end(), tbl[mask >> shift].end(), *this);}
+  iterator rbegin() {return std::reverse_iterator(end());}
+  iterator rend() {return std::reverse_iterator(begin());}
   bool empty() const {return sz == 0;}
   std::size_t size() const {return sz;}
   void clear() {tbl.clear();}
@@ -151,7 +151,7 @@ public:
     auto i0 = tbl.begin() + a(x);
     auto i1 = i0->emplace(b(x));
     if (!i1.second)
-      return std::make_pair(iterator(i0, i1.first, tbl.end(), shift), false);
+      return std::make_pair(iterator(i0, i1.first, *this), false);
     if (sz == (mask >> (shift-1))+1) {
       // resize the array
       shift--;
@@ -171,28 +171,24 @@ public:
     }
     sz++;
     i0 = tbl.begin() + a(x);
-    return std::make_pair(iterator(i0, i0->find(b(x)), tbl.end(), shift), true);
+    return std::make_pair(iterator(i0, i0->find(b(x)), *this), true);
+  }
+  template<class InputIt>
+  void insert(InputIt first, InputIt last) {for (InputIt i=first; i!=last; i++) {insert(*i);}}
+  void insert(std::initializer_list<key> ilist) {for (auto i : ilist) {insert(*i);}}
+  iterator erase(iterator pos) {
+    key x = *pos;
+    pos.i0->erase(pos.i1);
+    checkShrink();
+    sz--;
+    return upper_bound(x);
   }
   std::size_t erase(const key& x) {
     std::size_t s = tbl[a(x)].erase(b(x));
-    if (s == 0)
-      return 0;
-    if (mask && sz == -(mask >> 1)) {
-      // resize the array
-      mask <<= 1;
-      shift++;
-      s = tbl.size();
-      for (std::size_t i=1; i<s; i++) {
-        for (auto j : tbl[i]) {
-          key c = (i << (shift-1)) | j;
-          tbl[i>>1].emplace_hint(tbl[i>>1].end(), b(c));
-        }
-        tbl[i].clear();
-      }
-      tbl.resize(a(mask)+1);
-    }
-    sz--;
-    return 1;
+    if (s)
+      checkShrink();
+    sz -= s;
+    return s;
   }
   void swap(ktrie &other) {
     tbl.swap(other.tbl);
@@ -201,7 +197,7 @@ public:
     std::swap(shift, other.shift);
   }
   std::size_t count(const key& x) const {return contains(x);}
-  iterator find(const key& x) {auto i = tbl.begin() + a(x); return iterator(i, i->find(x), tbl.end());}
+  iterator find(const key& x) {auto i = tbl.begin() + a(x); return iterator(i, i->find(x), *this);}
   bool contains(const key& x) const {return tbl[a(x)].count(x) > 0;}
   std::pair<iterator, iterator> equal_range(const key& x) {
     auto i=lower_bound(x);
@@ -209,11 +205,11 @@ public:
   }
   iterator lower_bound(const key& x) {
     auto i = tbl.begin() + a(x);
-    return iterator(i, i->lower_bound(b(x)), tbl.end(), shift);
+    return iterator(i, i->lower_bound(b(x)), *this);
   }
   iterator upper_bound(const key& x) {
     auto i = tbl.begin() + a(x);
-    return iterator(i, i->upper_bound(b(x)), tbl.end(), shift);
+    return iterator(i, i->upper_bound(b(x)), *this);
   }
   std::size_t getDepth() {
     auto f = [] (const std::set<key> &i) {return i.size();};
@@ -225,6 +221,21 @@ private:
   vecT tbl;
   key mask;
   std::size_t sz, shift;
+  void checkShrink() {
+    if (mask && sz == -(mask >> 1)) {
+      // resize the array
+      mask <<= 1;
+      shift++;
+      for (std::size_t i=1; i<tbl.size(); i++) {
+        for (auto j : tbl[i]) {
+          key c = (i << (shift-1)) | j;
+          tbl[i>>1].emplace_hint(tbl[i>>1].end(), b(c));
+        }
+        tbl[i].clear();
+      }
+      tbl.resize(a(mask)+1);
+    }
+  }
   constexpr key a(key x) {return (x & mask) >> shift;};
   constexpr key b(key x) {return x & (~mask);};
 };
