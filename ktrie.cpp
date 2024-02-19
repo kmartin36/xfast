@@ -137,6 +137,8 @@ public:
     }
   };
   ktrie() : shift(8 * sizeof(key)), mask(0), sz(0), tbl(1) {}
+  ktrie(const ktrie& other) : shift(other.shift), mask(other.mask), sz(other.sz), tbl(other.tbl) {}
+  ktrie(ktrie&& other) : shift(other.shift), mask(other.mask), sz(other.sz), tbl(std::move(other.tbl)) {}
   template<class InputIt>
   ktrie(InputIt first, InputIt last) : shift(8 * sizeof(key)), mask(0), sz(0), tbl(1) {
     using category = typename std::iterator_traits<InputIt>::iterator_category;
@@ -169,6 +171,7 @@ public:
   iterator rend() {return std::reverse_iterator(begin());}
   bool empty() const {return sz == 0;}
   std::size_t size() const {return sz;}
+  std::size_t max_size() {return std::numeric_limits<std::size_t>::max();}
   void clear() {tbl.clear(); shift=8 * sizeof(key); mask=sz=0;}
   std::pair<iterator, bool> insert(key x) {
     auto i0 = tbl.begin() + a(x);
