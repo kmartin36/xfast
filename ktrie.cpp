@@ -137,14 +137,39 @@ public:
     }
   };
   ktrie() : shift(8 * sizeof(key)), mask(0), sz(0), tbl(1) {}
-  ktrie& operator=(const ktrie& other) {tbl=other.tbl; mask=other.mask; sz=other.sz; shift=other.shift;}
+  template<class InputIt>
+  ktrie(InputIt first, InputIt last) : shift(8 * sizeof(key)), mask(0), sz(0), tbl(1) {
+    using category = typename std::iterator_traits<InputIt>::iterator_category;
+    static_assert(std::is_base_of_v<std::input_iterator_tag, category>);
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, category>) {
+      resize(last - first);
+      for (auto i = first; i != last; i++)
+        tbl[a(*i)].emplace(b(*i));
+    } else {
+      insert(first, last);
+    }
+  }
+  ktrie(std::initializer_list<key> init) : tbl(1) {
+    resize(init.size());
+    for (auto &i : init)
+      tbl[a(i)].emplace(b(i));
+  }
+  ~ktrie() {clear();}
+  ktrie& operator=(const ktrie& other) {tbl=other.tbl; mask=other.mask; sz=other.sz; shift=other.shift; return *this;}
+  ktrie& operator=(const ktrie&& other) {tbl=std::move(other.tbl); mask=other.mask; sz=other.sz; shift=other.shift; return *this;}
+  ktrie& operator=(std::initializer_list<key> init) {
+    resize(init.size());
+    for (auto &i : init)
+      tbl[a(i)].emplace(b(i));
+    return *this;
+  }
   iterator begin() {return iterator(tbl.begin(), tbl[0].begin(), *this);}
   iterator end() {return iterator(tbl.end(), tbl[mask >> shift].end(), *this);}
   iterator rbegin() {return std::reverse_iterator(end());}
   iterator rend() {return std::reverse_iterator(begin());}
   bool empty() const {return sz == 0;}
   std::size_t size() const {return sz;}
-  void clear() {tbl.clear();}
+  void clear() {tbl.clear(); shift=8 * sizeof(key); mask=sz=0;}
   std::pair<iterator, bool> insert(key x) {
     auto i0 = tbl.begin() + a(x);
     auto i1 = i0->emplace(b(x));
@@ -173,7 +198,7 @@ public:
   }
   template<class InputIt>
   void insert(InputIt first, InputIt last) {for (InputIt i=first; i!=last; i++) {insert(*i);}}
-  void insert(std::initializer_list<key> ilist) {for (auto i : ilist) {insert(*i);}}
+  void insert(std::initializer_list<key> ilist) {for (auto i : ilist) {insert(i);}}
   iterator erase(iterator pos) {
     key x = *pos;
     pos.i0->erase(pos.i1);
@@ -219,6 +244,12 @@ private:
   vecT tbl;
   key mask;
   std::size_t sz, shift;
+  void resize(std::size_t count) {
+    sz = count;
+    shift = __builtin_clzll(std::max(sz, (std::size_t)1)-1);
+    mask = ~0ULL << shift;
+    tbl.resize((mask >> shift) + 1);
+  }
   void checkShrink() {
     if (mask && sz == -(mask >> 1)) {
       // resize the array
