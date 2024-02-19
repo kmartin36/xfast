@@ -54,37 +54,35 @@ private:
     std::size_t i;
     extVec<T> *a;
   };
-  extVec(std::size_t count) {tbl.reserve(8*sizeof(std::size_t) + 1);resize(count);}
-  ~extVec() {tbl.clear();}
-  std::size_t size() {return tbl.empty() ? 0 : a();}
-  void clear() {tbl.clear();}
+  extVec(std::size_t count) {tbl.reserve(8*sizeof(std::size_t) - 12);resize(count);}
+  ~extVec() {clear();}
+  std::size_t size() {return tbl.empty() ? t0.size() : (4096ULL<<tbl.size());}
+  void clear() {resize(0);}
   void resize(std::size_t count) {
-    if (!count) {
-      tbl.clear();
-      return;
-    }
-    if (tbl.empty())
-      tbl.push_back(new T [1]);
-    for (std::size_t sz = a(); sz < count; sz <<= 1) {
+    if (count <= 4096)
+      t0.resize(count);
+    for (std::size_t sz = size(); sz < count; sz <<= 1) {
       tbl.push_back(new T [sz]);
     }
-    for (std::size_t sz = a(); sz > count; sz >>= 1) {
+    while (size() > count) {
       delete[] tbl.back();
       tbl.pop_back();
     }
   }
   T& operator[](std::size_t pos) {
-    if (pos == 0)
-      return tbl[0][0];
-    uint8_t shift = __builtin_clzll(pos);
-    return tbl[64-shift][pos & ((~0ULL >> shift) >> 1)];
+    if (pos < 4096)
+      return t0[pos];
+    uint8_t shift = __builtin_clzll(pos >> 12);
+    return tbl.at(63-shift)[pos & (~0ULL >> (shift-11))];
   }
   iterator begin() { return iterator((std::size_t)0, this); }
   iterator end() { return iterator(size(), this); }
+  iterator rbegin() {return std::reverse_iterator(end());}
+  iterator rend() {return std::reverse_iterator(begin());}
   void swap(extVec &other) {tbl.swap(other.tbl);}
 private:
   std::vector<T*> tbl;
-  constexpr std::size_t a() {return ((std::size_t)1)<<(tbl.size()-1);};
+  std::vector<T> t0;
 };
 
 template <class key>
